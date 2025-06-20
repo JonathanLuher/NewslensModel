@@ -6,10 +6,10 @@ def normalizar(texto, nlp):
     """
     Normalización mejorada:
     - Elimina URLs, menciones, hashtags
-    - Elimina números y puntuación
-    - Lematización (en lugar de solo tokenización)
-    - Filtra stopwords personalizadas
+    - Conserva signos de exclamación/interrogación
     - Normaliza caracteres acentuados
+    - Maneja nombres propios combinados
+    - Lematización y filtrado de stopwords
     """
     # Normalizar caracteres unicode (ej. á -> a)
     texto = normalize('NFKD', texto).encode('ASCII', 'ignore').decode('ASCII')
@@ -20,28 +20,30 @@ def normalizar(texto, nlp):
     # Eliminar menciones y hashtags
     texto = re.sub(r'@\w+|#\w+', '', texto)
     
-    # Eliminar números
-    texto = re.sub(r'\d+', '', texto)
+    # Conservar signos de exclamación/interrogación
+    texto = re.sub(r'[^\w\s¡!¿?ñ]', ' ', texto.lower())
     
-    # Eliminar puntuación y caracteres especiales (conserva ñ)
-    texto = re.sub(r'[^\w\sñ]|_', ' ', texto)
-    
-    # Minúsculas
-    texto = texto.lower().strip()
+    # Manejar nombres propios combinados (YORDI ROSADO -> yordi_rosado)
+    texto = re.sub(r'\b([A-ZÁÉÍÓÚÑ]{2,}\s[A-ZÁÉÍÓÚÑ]{2,})\b', 
+                  lambda m: m.group(1).lower().replace(' ', '_'), texto)
     
     # Tokenización y lematización
     doc = nlp(texto)
+    tokens = []
     
-    # Stopwords personalizadas (puedes añadir más)
-    custom_stopwords = {"que", "de", "el", "la", "los", "las", "un", "una", "con"}
-    
-    tokens = [
-        token.lemma_ for token in doc 
-        if not token.is_stop 
-        and not token.is_punct 
-        and not token.is_space
-        and token.lemma_ not in custom_stopwords
-        and len(token.lemma_) > 2
-    ]
+    for token in doc:
+        if not token.is_punct and not token.is_space:
+            # Manejar signos de puntuación especiales
+            if token.text in ['!', '¡']:
+                tokens.append('EXCL_')
+            elif token.text in ['?', '¿']:
+                tokens.append('QUEST_')
+            # Conservar negaciones
+            elif token.lower_ in ['no', 'ni', 'nunca']:
+                tokens.append('NOT_')
+            else:
+                lemma = token.lemma_.lower()
+                if len(lemma) > 2:
+                    tokens.append(lemma)
     
     return ' '.join(tokens)
