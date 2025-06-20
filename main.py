@@ -8,10 +8,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 from normalizacion.normalizacion import normalizar
 
-# Configuración
-CORPUS_PATH = os.path.join('corpus', 'TA1C_dataset_detection_train.csv')
+# Configuración (actualizada con el nuevo dataset)
+CORPUS_PATH = os.path.join('dataset', 'Dataset_fakenews.csv')
 OUTPUT_FOLDER = 'corpus/normalizacion3'
-MODEL_PATH = os.path.join('modelos', 'svm_unigram_binary.pkl')
+MODEL_PATH = os.path.join('modelos', 'svm_unigram_binary_headline.pkl')
 
 def cargar_datos():
     """Carga el corpus original"""
@@ -20,12 +20,11 @@ def cargar_datos():
     return pd.read_csv(CORPUS_PATH)
 
 def aplicar_normalizacion(datos):
-    """Aplica la normalización 3 al texto"""
+    """Aplica la normalización 3 al texto (ahora en la columna Headline)"""
     nlp = spacy.load('es_core_news_sm')
     datos_normalizados = datos.copy()
-    datos_normalizados['Teaser Text'] = datos_normalizados['Teaser Text'].apply(
-        lambda x: normalizar(str(x), nlp)
-    )
+    datos_normalizados['Headline'] = datos_normalizados['Headline'].apply(
+        lambda x: normalizar(str(x), nlp))
     return datos_normalizados
 
 def crear_representacion_unigram_binary(X):
@@ -54,17 +53,21 @@ def main():
     datos_norm = aplicar_normalizacion(datos)
     
     # Guardar corpus normalizado
-    ruta_corpus_norm = os.path.join(OUTPUT_FOLDER, 'corpus_normalizado3.csv')
+    ruta_corpus_norm = os.path.join(OUTPUT_FOLDER, 'corpus_normalizado3_headline.csv')
     datos_norm.to_csv(ruta_corpus_norm, index=False)
     print(f"Corpus normalizado guardado en: {ruta_corpus_norm}")
 
-    # 2. Crear representación unigram-binary
-    X = datos_norm['Teaser Text']
-    y = datos_norm['Tag Value']
+    # 2. Crear representación unigram-binary usando Headline
+    X = datos_norm['Headline']  # Ahora usamos Headline en lugar de Teaser Text
+    y = datos_norm['Category']  # Usamos Category (Fake/True) como etiqueta
+    
+    # Convertir etiquetas a binario (Fake = 1, True = 0)
+    y = y.map({'Fake': 1, 'True': 0})
+    
     X_vec, vectorizer = crear_representacion_unigram_binary(X)
     
     # Guardar vectorizer para uso futuro
-    joblib.dump(vectorizer, os.path.join('modelos', 'unigram_binary_vectorizer.pkl'))
+    joblib.dump(vectorizer, os.path.join('modelos', 'unigram_binary_vectorizer_headline.pkl'))
 
     # 3. Dividir datos (80% train - 20% test)
     X_train, X_test, y_train, y_test = train_test_split(
