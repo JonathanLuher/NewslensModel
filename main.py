@@ -40,35 +40,39 @@ def cargar_datos():
     # Verificación básica de calidad de datos
     if datos.isnull().sum().sum() > 0:
         print("Advertencia: Hay valores nulos en el dataset")
-        datos = datos.dropna(subset=['Headline', 'Category'])
+        datos = datos.dropna(subset=['Text', 'Category'])  # Cambio a columna Text
+    
+    # Filtrar textos muy cortos
+    datos = datos[datos['Text'].str.len() > 50]
     
     return datos
 
 def aplicar_normalizacion(datos):
-    """Aplica la normalización mejorada con caché para eficiencia"""
+    """Aplica la normalización mejorada al texto completo"""
     nlp = spacy.load('es_core_news_sm', disable=['parser', 'ner'])
     datos_normalizados = datos.copy()
     
     # Preprocesamiento adicional antes de normalizar
-    datos_normalizados['Headline'] = datos_normalizados['Headline'].astype(str)
+    datos_normalizados['Text'] = datos_normalizados['Text'].astype(str)
     
-    # Aplicar normalización
-    datos_normalizados['Headline'] = [normalizar(texto, nlp) for texto in datos_normalizados['Headline']]
+    # Aplicar normalización al texto completo
+    print("Normalizando textos (esto puede tomar tiempo)...")
+    datos_normalizados['Text'] = [normalizar(texto, nlp) for texto in datos_normalizados['Text']]
     
     return datos_normalizados
 
 def agregar_caracteristicas(df):
-    """Feature engineering avanzado con más características lingüísticas"""
+    """Feature engineering avanzado para texto completo"""
     # Características básicas
-    df['longitud'] = df['Headline'].apply(len)
-    df['num_palabras'] = df['Headline'].apply(lambda x: len(x.split()))
-    df['palabras_unicas'] = df['Headline'].apply(lambda x: len(set(x.split())))
+    df['longitud'] = df['Text'].apply(len)
+    df['num_palabras'] = df['Text'].apply(lambda x: len(x.split()))
+    df['palabras_unicas'] = df['Text'].apply(lambda x: len(set(x.split())))
     df['palabras_unicas_ratio'] = df['palabras_unicas'] / df['num_palabras']
-    df['mayusculas'] = df['Headline'].apply(lambda x: sum(1 for c in x if c.isupper()))
+    df['mayusculas'] = df['Text'].apply(lambda x: sum(1 for c in x if c.isupper()))
     
     # Características de puntuación
-    df['exclamaciones'] = df['Headline'].str.count(r'[¡!]')
-    df['interrogaciones'] = df['Headline'].str.count(r'[¿?]')
+    df['exclamaciones'] = df['Text'].str.count(r'[¡!]')
+    df['interrogaciones'] = df['Text'].str.count(r'[¿?]')
     df['puntuacion_total'] = df['exclamaciones'] + df['interrogaciones']
     
     # Características de contenido emocional/sensacionalista
@@ -76,37 +80,44 @@ def agregar_caracteristicas(df):
         'urgente', 'exclusivo', 'impactante', 'revelación', 
         'escándalo', 'impacto', 'descubre', 'revela', 'sorprende',
         'asombroso', 'increíble', 'aterrador', 'alerta', 'peligro',
-        'shock', 'bomba', 'explosivo', 'oculto', 'censurado'
+        'shock', 'bomba', 'explosivo', 'oculto', 'censurado', 'conspiración'
     ]
-    df['sensacionalistas'] = df['Headline'].str.count(
+    df['sensacionalistas'] = df['Text'].str.count(
         r'\b(' + '|'.join(sensacionalistas) + r')\b')
     
-    # Características de URL (si está presente en el título)
-    df['contiene_url'] = df['Headline'].str.contains(r'http[s]?://', na=False).astype(int)
+    # Características de URL (si está presente en el texto)
+    df['contiene_url'] = df['Text'].str.contains(r'http[s]?://', na=False).astype(int)
     
     # Características de entidades nombradas (aproximación simple)
-    df['num_entidades'] = df['Headline'].str.count(r'ent_\w+')
+    df['num_entidades'] = df['Text'].str.count(r'ent_\w+')
     
     # Característica de polaridad (positiva/negativa)
-    palabras_positivas = ['bueno', 'excelente', 'maravilloso', 'genial']
-    palabras_negativas = ['malo', 'terrible', 'horrible', 'pésimo']
-    df['polaridad_pos'] = df['Headline'].str.count(r'\b(' + '|'.join(palabras_positivas) + r')\b')
-    df['polaridad_neg'] = df['Headline'].str.count(r'\b(' + '|'.join(palabras_negativas) + r')\b')
+    palabras_positivas = ['bueno', 'excelente', 'maravilloso', 'genial', 'positivo']
+    palabras_negativas = ['malo', 'terrible', 'horrible', 'pésimo', 'negativo']
+    df['polaridad_pos'] = df['Text'].str.count(r'\b(' + '|'.join(palabras_positivas) + r')\b')
+    df['polaridad_neg'] = df['Text'].str.count(r'\b(' + '|'.join(palabras_negativas) + r')\b')
+    
+    # Característica de citas (indicador de veracidad)
+    df['num_citas'] = df['Text'].str.count(r'"(.*?)"')
+    
+    # Característica de nombres propios (mayúsculas sostenidas)
+    df['nombres_propios'] = df['Text'].str.count(r'\b[A-Z][a-z]+\b')
     
     return df
 
 def crear_pipeline():
-    """Pipeline optimizado con selección de características y ensemble"""
+    """Pipeline optimizado para análisis de texto completo"""
     # Procesamiento de texto mejorado
     text_features = Pipeline([
         ('tfidf', TfidfVectorizer(
-            tokenizer=tokenize_text,  # Usamos la función definida arriba
+            tokenizer=tokenize_text,
             min_df=5,
             max_df=0.85,
-            ngram_range=(1, 3),
-            max_features=10000
+            ngram_range=(1, 2),  # Reducido a bigramas por el texto más largo
+            max_features=15000,   # Aumentado para capturar más información
+            sublinear_tf=True     # Suavizar la frecuencia de términos
         )),
-        ('feature_selection', SelectKBest(chi2, k=5000))
+        ('feature_selection', SelectKBest(chi2, k=8000))
     ])
     
     # Procesamiento numérico
@@ -114,25 +125,26 @@ def crear_pipeline():
         ('scaler', MinMaxScaler())
     ])
     
-    # ColumnTransformer
+    # ColumnTransformer - Cambiado a usar 'Text' en lugar de 'Headline'
     preprocessor = ColumnTransformer([
-        ('text', text_features, 'Headline'),
+        ('text', text_features, 'Text'),  # Cambio clave aquí
         ('num', numeric_features, ['longitud', 'num_palabras', 'palabras_unicas', 
                                  'palabras_unicas_ratio', 'mayusculas', 'exclamaciones', 
                                  'interrogaciones', 'puntuacion_total', 'sensacionalistas',
-                                 'contiene_url', 'num_entidades', 'polaridad_pos', 'polaridad_neg'])
+                                 'contiene_url', 'num_entidades', 'polaridad_pos', 
+                                 'polaridad_neg', 'num_citas', 'nombres_propios'])
     ])
     
     # Modelo base XGBoost optimizado
     xgb_model = XGBClassifier(
-        n_estimators=300,
-        max_depth=5,
+        n_estimators=400,  # Aumentado para texto más complejo
+        max_depth=6,
         learning_rate=0.05,
-        subsample=0.9,
-        colsample_bytree=0.8,
-        gamma=0.1,
-        reg_alpha=0.1,
-        reg_lambda=0.1,
+        subsample=0.8,
+        colsample_bytree=0.7,
+        gamma=0.2,
+        reg_alpha=0.2,
+        reg_lambda=0.2,
         eval_metric='logloss',
         random_state=42,
         use_label_encoder=False
@@ -140,7 +152,7 @@ def crear_pipeline():
     
     # Modelo SVM para stacking
     svm_model = SVC(
-        C=1.0,
+        C=1.5,  # Aumentado para texto más complejo
         kernel='linear',
         probability=True,
         random_state=42
@@ -148,9 +160,9 @@ def crear_pipeline():
     
     # Modelo Random Forest para diversidad
     rf_model = RandomForestClassifier(
-        n_estimators=200,
-        max_depth=10,
-        min_samples_split=5,
+        n_estimators=300,  # Aumentado para texto más complejo
+        max_depth=12,
+        min_samples_split=3,
         random_state=42
     )
     
@@ -163,9 +175,9 @@ def crear_pipeline():
         ],
         final_estimator=LogisticRegression(
             penalty='l2',
-            C=0.1,
+            C=0.2,
             solver='liblinear',
-            max_iter=1000
+            max_iter=1500
         ),
         stack_method='predict_proba',
         passthrough=True
@@ -224,7 +236,7 @@ def main():
     )
 
     # 4. Crear y evaluar modelo
-    print("\nCreando modelo...")
+    print("\nCreando modelo para análisis de texto completo...")
     pipeline = crear_pipeline()
     
     # 5. Evaluación con validación cruzada
